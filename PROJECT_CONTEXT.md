@@ -324,6 +324,12 @@ panorama_app/frontend/src/App.tsx
   - phase component counts;
   - decision reason.
 
+Текущий сдачный UI:
+
+- верхняя панель содержит только команды и переключатели: `Pan`, `Add talc`, `Erase talc`, `Talc`, `Phases`, `Reset all`, `Export`;
+- слайдеры `Brush`, `Threshold`, `Opacity` перенесены в правую панель `View controls`, чтобы toolbar не занимал половину экрана;
+- это особенно важно для демонстрации на небольшом экране и при записи видео.
+
 ## Backend API
 
 Основные endpoints:
@@ -395,6 +401,75 @@ http://127.0.0.1:5173
 ```bash
 tail -f /home/team117/nornik/logs/panorama_backend.log
 tail -f /home/team117/nornik/logs/panorama_frontend.log
+```
+
+## Docker для сдачи
+
+Добавлены файлы:
+
+```text
+Dockerfile
+docker-compose.yml
+.dockerignore
+SUBMISSION_README.md
+```
+
+Docker-образ содержит только runtime-минимум:
+
+```text
+panorama_app/
+models/
+  talc_unetpp_effb3_768.onnx
+  ore_classifier_3class_effb3.onnx
+  ore_classifier_3class_effb3.json
+demo_images/
+PROJECT_CONTEXT.md
+SUBMISSION_README.md
+```
+
+В Docker не входят:
+
+- исходный полный датасет;
+- обучающие runs;
+- wandb;
+- `.venv`;
+- старые EDA/training notebooks, кроме актуального 3-class classifier notebook в git.
+
+Запуск Docker:
+
+```bash
+docker compose up --build
+```
+
+UI в Docker:
+
+```text
+http://localhost:7860
+```
+
+Для GPU в `docker-compose.yml` используется:
+
+```yaml
+runtime: nvidia
+NVIDIA_VISIBLE_DEVICES: all
+```
+
+Если Compose не поддерживает `runtime: nvidia`, можно собрать образ и запустить:
+
+```bash
+docker run --gpus all -p 7860:7860 -v ./data:/app/data nornik-ore-analysis:latest
+```
+
+FastAPI сам отдаёт собранный frontend из `panorama_app/frontend/dist`, поэтому в Docker нужен только один процесс и один порт `7860`.
+
+Demo images:
+
+```text
+demo_images/demo_talc_00001.jpg
+demo_images/demo_ordinary_00001.jpg
+demo_images/demo_difficult_thin_00001.jpg
+demo_images/demo_difficult_refractory_00001.jpg
+demo_images/demo_panorama_00001.jpg
 ```
 
 ## Важные текущие проблемы

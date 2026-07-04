@@ -2,8 +2,8 @@ fastapi
 uvicorn
 python-multipart
 numpy
-opencv-python
+opencv-python-headless
 pillow
 pydantic
-onnxruntime-gpu
+onnxruntime-gpu==1.18.1
 onnx

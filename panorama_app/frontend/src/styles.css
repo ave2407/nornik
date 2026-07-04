@@ -24,6 +24,11 @@ button.active, button.selected { border-color: #2563eb; background: #eaf1ff; }
 .stats dt { color: #667789; }
 .stats dd { margin: 0; font-weight: 600; word-break: break-word; }
 .muted { color: #667789; margin: 0; }
+.controlStack { display: grid; gap: 12px; }
+.controlStack label { display: grid; grid-template-columns: 76px 1fr 48px; align-items: center; gap: 8px; color: #344256; }
+.controlStack span { color: #667789; }
+.controlStack strong { font-size: 13px; text-align: right; }
+.controlStack input[type="range"] { width: 100%; min-width: 0; }
 @media (max-width: 1100px) {
   .app { grid-template-columns: 240px 1fr; }
   .inspector { display: none; }

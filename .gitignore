@@ -33,6 +33,9 @@ talc1-5d08d959.json
 *.pth
 *.ckpt
 *.safetensors
+!models/
+!models/*.onnx
+!models/*.json
 
 # Heavy exploratory artifacts
 EDA.ipynb

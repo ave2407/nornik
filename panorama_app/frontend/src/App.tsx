@@ -76,6 +76,58 @@ function ClassificationPanel({ project }: { project: ProjectInfo | null }) {
   );
 }
 
+function SettingsPanel({
+  selected,
+  brushSize,
+  setBrushSize,
+  threshold,
+  updateThreshold,
+  commitThreshold,
+  maskOpacity,
+  setMaskOpacity,
+}: {
+  selected: ProjectInfo | null;
+  brushSize: number;
+  setBrushSize: (value: number) => void;
+  threshold: number;
+  updateThreshold: (value: number) => void;
+  commitThreshold: (value: number) => void;
+  maskOpacity: number;
+  setMaskOpacity: (value: number) => void;
+}) {
+  return (
+    <section className="panel">
+      <h2>View controls</h2>
+      <div className="controlStack">
+        <label>
+          <span>Brush</span>
+          <input type="range" min="2" max="128" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} />
+          <strong>{brushSize}px</strong>
+        </label>
+        <label>
+          <span>Threshold</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={threshold}
+            disabled={selected?.status !== "ready"}
+            onChange={(e) => updateThreshold(Number(e.target.value))}
+            onPointerUp={() => commitThreshold(threshold)}
+          />
+          <strong>{threshold.toFixed(2)}</strong>
+        </label>
+        <label>
+          <span>Opacity</span>
+          <input type="range" min="0" max="1" step="0.05" value={maskOpacity} onChange={(e) => setMaskOpacity(Number(e.target.value))} />
+          <strong>{maskOpacity.toFixed(2)}</strong>
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function Viewer({
   project,
   tool,
@@ -329,9 +381,6 @@ function App() {
           <button className={tool === "erase" ? "active" : ""} disabled={selected?.status !== "ready"} onClick={() => setTool("erase")}><Eraser size={16} /> Erase talc</button>
           <button className={overlayMode === "talc" ? "active" : ""} onClick={() => setOverlayMode("talc")}>Talc</button>
           <button className={overlayMode === "phases" ? "active" : ""} disabled={selected?.status !== "ready"} onClick={() => setOverlayMode("phases")}>Phases</button>
-          <label>Brush <input type="range" min="2" max="128" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /> {brushSize}px</label>
-          <label>Threshold <input type="range" min="0" max="1" step="0.01" value={threshold} disabled={selected?.status !== "ready"} onChange={(e) => updateThreshold(Number(e.target.value))} onPointerUp={() => commitThreshold(threshold).catch(console.error)} /> {threshold.toFixed(2)}</label>
-          <label>Opacity <input type="range" min="0" max="1" step="0.05" value={maskOpacity} onChange={(e) => setMaskOpacity(Number(e.target.value))} /> {maskOpacity.toFixed(2)}</label>
           <button disabled={selected?.status !== "ready"} onClick={resetAll}><RotateCcw size={16} /> Reset all</button>
           <button disabled={!selected} onClick={exportZip}><Download size={16} /> Export</button>
         </div>
@@ -361,6 +410,16 @@ function App() {
             </dl>
           ) : <p className="muted">Select a project</p>}
         </section>
+        <SettingsPanel
+          selected={selected}
+          brushSize={brushSize}
+          setBrushSize={setBrushSize}
+          threshold={threshold}
+          updateThreshold={updateThreshold}
+          commitThreshold={(value) => commitThreshold(value).catch(console.error)}
+          maskOpacity={maskOpacity}
+          setMaskOpacity={setMaskOpacity}
+        />
         <ClassificationPanel project={selected} />
         <StatsPanel project={selected} />
       </aside>

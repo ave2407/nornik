@@ -10,6 +10,7 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from .classifier import ExpertRuleClassifierService
 from .config import (
@@ -383,3 +384,8 @@ def api_phase_tile(project_id: str, z: int, x: int, y: int) -> Response:
     rgba[ordinary] = (0, 180, 0, 150)
     rgba[thin] = (0, 0, 255, 150)
     return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")
+
+
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

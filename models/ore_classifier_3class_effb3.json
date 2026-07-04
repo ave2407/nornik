@@ -1,0 +1,11 @@
+{
+  "classes": [
+    "ordinary",
+    "difficult",
+    "talc"
+  ],
+  "model_name": "efficientnet_b3",
+  "img_size": 512,
+  "checkpoint": "/home/team117/nornik/models/ore_classifier_3class_effb3.pt",
+  "onnx": "/home/team117/nornik/models/ore_classifier_3class_effb3.onnx"
+}

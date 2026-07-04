@@ -17,6 +17,6 @@ OVERLAP = int(os.getenv("PANORAMA_OVERLAP", "192"))
 INFER_BATCH_SIZE = int(os.getenv("PANORAMA_BATCH_SIZE", "4"))
 DEFAULT_THRESHOLD = float(os.getenv("PANORAMA_THRESHOLD", "0.5"))
 VIEW_TILE_SIZE = int(os.getenv("PANORAMA_VIEW_TILE_SIZE", "256"))
+MIN_COMPONENT_PIXELS = int(os.getenv("PANORAMA_MIN_COMPONENT_PIXELS", "500"))
 
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-

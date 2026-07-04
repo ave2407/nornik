@@ -230,6 +230,15 @@ cd /home/team117/nornik
 bash panorama_app/start_server.sh
 ```
 
+## Latest panorama performance patch
+
+Applied on 2026-07-04:
+
+- Frontend threshold slider now updates local UI immediately, but sends the backend request with debounce and commits once on pointer release. This prevents a large panorama mask recomputation on every tiny slider movement.
+- Backend mask tile endpoint now crops `mask_final.png` first and creates RGBA only for the requested tile crop. It no longer allocates a full-panorama RGBA array per mask tile request.
+- Backend skips `overlay_preview.jpg` regeneration for images larger than `20_000_000` pixels. Large panoramas are displayed through image/mask tiles, so full preview regeneration is unnecessary during threshold/edit/reset.
+- These changes target UI freezes during pan/zoom and threshold adjustment on panorama projects.
+
 Сервисы:
 
 ```text
@@ -323,7 +332,7 @@ export zip: 15.5 MB
   - total pixels;
   - mask pixels;
   - fill percent;
-  - connected components;
+  - connected components, filtered by minimum component size;
   - largest component pixels;
   - largest component bbox;
 - export ZIP;
@@ -347,7 +356,7 @@ export zip: 15.5 MB
 - во время/после переключения между проектами изображение и маска могли пропасть;
 - сервер временно перестал отвечать по SSH, вероятно из-за тяжелой обработки панорамы.
 
-Подготовленный фикс:
+Уже примененный фикс:
 
 - inference переведен в отдельный `ThreadPoolExecutor(max_workers=1)`;
 - `/api/projects/{id}/infer` теперь быстро возвращает статус `running`, а обработка идет фоном;
@@ -356,6 +365,30 @@ export zip: 15.5 MB
 - `overlay_preview.jpg` ограничен `max_side=4096`, чтобы не кодировать огромную панораму целиком;
 - frontend mask layer обновляется через `maskRevision`, без потери слоя при переключении threshold/edit;
 - UI показывает прогресс inference.
+
+Дополнительный фикс после теста UI:
+
+- edge tiles теперь всегда отдаются как `256x256`, а недостающая часть edge tile заполняется пустым canvas; это убирает растянутые/размытые края изображений;
+- добавлен отдельный инструмент `Pan`; при `Add`/`Erase` OpenSeadragon mouse navigation отключается, поэтому drag уходит в brush stroke, а не в перемещение фотографии;
+- `threshold` и `edit` запрещены для проектов не в статусе `ready`, API возвращает `409`, а не `500`;
+- добавлен endpoint `POST /api/projects/{id}/cancel`;
+- зависшая старая панорама `f3fc4a2304e2` переведена в `cancelled`;
+- tile endpoints используют LRU cache для `cv2.imread`, чтобы панорама не декодировалась с диска заново на каждый тайл.
+
+Проверено на сервере:
+
+```text
+edge image tile: 256x256
+edge mask tile:  256x256 RGBA
+edit changed mask_pixels: 1050701 -> 1060123
+threshold on cancelled project: 409 Mask is not ready yet
+```
+
+Component statistics note:
+
+- `mask_pixels` and `fill_percent` are computed over the full final mask.
+- `component_count` and `largest_component_*` ignore small components below `PANORAMA_MIN_COMPONENT_PIXELS`.
+- Default minimum component size: `500` pixels.
 
 Файлы фикса:
 
@@ -372,22 +405,21 @@ panorama_app/frontend/src/App.tsx
 
 ### Срочно
 
-1. Залить последний фикс на сервер.
-2. Перезапустить приложение:
+1. После изменений кода перезапустить приложение:
 
 ```bash
 cd /home/team117/nornik
 bash panorama_app/start_server.sh
 ```
 
-3. Проверить:
+2. Проверить:
 
 ```bash
 curl http://127.0.0.1:7860/api/health
 tail -f logs/panorama_backend.log
 ```
 
-4. Повторить тест:
+3. Повторить тест:
    - открыть UI;
    - загрузить небольшое изображение;
    - запустить inference;
@@ -465,4 +497,3 @@ pkill -f "npm run dev"
 cd /home/team117/nornik
 bash panorama_app/start_server.sh
 ```
-

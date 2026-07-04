@@ -11,7 +11,7 @@ export type MaskStats = {
 
 export type ProjectInfo = {
   id: string;
-  status: "created" | "running" | "ready" | "failed";
+  status: "created" | "running" | "ready" | "failed" | "cancelled";
   threshold: number;
   image: { width: number; height: number; filename: string };
   stats: MaskStats | null;
@@ -44,6 +44,8 @@ export const api = {
     return request<ProjectInfo>("/api/projects", { method: "POST", body });
   },
   infer: (id: string) => request<ProjectInfo>(`/api/projects/${id}/infer`, { method: "POST" }),
+  cancel: (id: string) => request<ProjectInfo>(`/api/projects/${id}/cancel`, { method: "POST" }),
+  reset: (id: string) => request<ProjectInfo>(`/api/projects/${id}/reset`, { method: "POST" }),
   threshold: (id: string, threshold: number) =>
     request<ProjectInfo>(`/api/projects/${id}/threshold`, {
       method: "PATCH",

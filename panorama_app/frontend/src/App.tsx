@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import OpenSeadragon from "openseadragon";
-import { Download, Eraser, Paintbrush, Play, RefreshCw, Upload } from "lucide-react";
+import { Download, Eraser, Hand, Paintbrush, Play, RefreshCw, RotateCcw, Square, Upload } from "lucide-react";
 import { API_BASE, ProjectInfo, ClassificationResult, api } from "./api";
 import "./styles.css";
 
-type Tool = "add" | "erase";
+type Tool = "pan" | "add" | "erase";
 
 function StatsPanel({ project }: { project: ProjectInfo | null }) {
   const stats = project?.stats;
@@ -88,7 +88,7 @@ function Viewer({
       prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/images/",
       tileSources: makeTileSource(project.id, "image", project.image.width, project.image.height),
       showNavigator: true,
-      gestureSettingsMouse: { clickToZoom: false },
+      gestureSettingsMouse: { clickToZoom: false, dragToPan: true },
     });
     viewerRef.current = viewer;
     return () => viewer.destroy();
@@ -114,13 +114,17 @@ function Viewer({
     const viewer = viewerRef.current;
     if (!viewer || !project) return;
     const activeViewer = viewer;
+    activeViewer.setMouseNavEnabled(tool === "pan");
+    if (tool === "pan") return;
 
     const tracker = new OpenSeadragon.MouseTracker({
       element: viewer.canvas,
       pressHandler: (event: any) => {
+        event.preventDefaultAction = true;
         pointsRef.current = [viewportPointToImage(event.position)];
       },
       dragHandler: (event: any) => {
+        event.preventDefaultAction = true;
         pointsRef.current.push(viewportPointToImage(event.position));
       },
       releaseHandler: async () => {
@@ -161,9 +165,10 @@ function App() {
   const [threshold, setThreshold] = useState(0.5);
   const [maskOpacity, setMaskOpacity] = useState(0.45);
   const [brushSize, setBrushSize] = useState(24);
-  const [tool, setTool] = useState<Tool>("add");
+  const [tool, setTool] = useState<Tool>("pan");
   const [busy, setBusy] = useState(false);
   const [maskRevision, setMaskRevision] = useState(0);
+  const thresholdTimerRef = useRef<number | null>(null);
 
   const refreshProjects = async () => setProjects(await api.projects());
 
@@ -203,12 +208,43 @@ function App() {
     }
   };
 
-  const updateThreshold = async (value: number) => {
+  const cancelInference = async () => {
     if (!selected) return;
-    setThreshold(value);
+    const p = await api.cancel(selected.id);
+    setSelected(p);
+    await refreshProjects();
+  };
+
+  const commitThreshold = async (value: number) => {
+    if (!selected || selected.status !== "ready") return;
+    if (thresholdTimerRef.current !== null) {
+      window.clearTimeout(thresholdTimerRef.current);
+      thresholdTimerRef.current = null;
+    }
     const p = await api.threshold(selected.id, value);
     setSelected(p);
     setMaskRevision((x) => x + 1);
+  };
+
+  const updateThreshold = (value: number) => {
+    setThreshold(value);
+    if (!selected || selected.status !== "ready") return;
+    if (thresholdTimerRef.current !== null) {
+      window.clearTimeout(thresholdTimerRef.current);
+    }
+    thresholdTimerRef.current = window.setTimeout(() => {
+      commitThreshold(value).catch(console.error);
+      thresholdTimerRef.current = null;
+    }, 450);
+  };
+
+  const resetAll = async () => {
+    if (!selected || selected.status !== "ready") return;
+    const p = await api.reset(selected.id);
+    setSelected(p);
+    setThreshold(p.threshold);
+    setMaskRevision((x) => x + 1);
+    await refreshProjects();
   };
 
   const exportZip = async () => {
@@ -236,7 +272,8 @@ function App() {
           Upload image
           <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
         </label>
-        <button disabled={!selected || busy} onClick={runInference}><Play size={16} /> Run inference</button>
+          <button disabled={!selected || busy} onClick={runInference}><Play size={16} /> Run inference</button>
+        <button disabled={!selected || selected.status !== "running"} onClick={cancelInference}><Square size={16} /> Cancel</button>
         <button onClick={refreshProjects}><RefreshCw size={16} /> Refresh</button>
         <div className="projectList">
           {projects.map((p) => (
@@ -250,11 +287,13 @@ function App() {
 
       <section className="workspace">
         <div className="toolbar">
-          <button className={tool === "add" ? "active" : ""} onClick={() => setTool("add")}><Paintbrush size={16} /> Add</button>
-          <button className={tool === "erase" ? "active" : ""} onClick={() => setTool("erase")}><Eraser size={16} /> Erase</button>
+          <button className={tool === "pan" ? "active" : ""} onClick={() => setTool("pan")}><Hand size={16} /> Pan</button>
+          <button className={tool === "add" ? "active" : ""} disabled={selected?.status !== "ready"} onClick={() => setTool("add")}><Paintbrush size={16} /> Add</button>
+          <button className={tool === "erase" ? "active" : ""} disabled={selected?.status !== "ready"} onClick={() => setTool("erase")}><Eraser size={16} /> Erase</button>
           <label>Brush <input type="range" min="2" max="128" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /> {brushSize}px</label>
-          <label>Threshold <input type="range" min="0" max="1" step="0.01" value={threshold} onChange={(e) => updateThreshold(Number(e.target.value))} /> {threshold.toFixed(2)}</label>
+          <label>Threshold <input type="range" min="0" max="1" step="0.01" value={threshold} disabled={selected?.status !== "ready"} onChange={(e) => updateThreshold(Number(e.target.value))} onPointerUp={() => commitThreshold(threshold).catch(console.error)} /> {threshold.toFixed(2)}</label>
           <label>Opacity <input type="range" min="0" max="1" step="0.05" value={maskOpacity} onChange={(e) => setMaskOpacity(Number(e.target.value))} /> {maskOpacity.toFixed(2)}</label>
+          <button disabled={selected?.status !== "ready"} onClick={resetAll}><RotateCcw size={16} /> Reset all</button>
           <button disabled={!selected} onClick={exportZip}><Download size={16} /> Export</button>
         </div>
         <Viewer

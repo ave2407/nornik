@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -56,6 +57,23 @@ app.add_middleware(
 classifier = DummyClassifierService()
 onnx_model = OnnxSegmentationModel()
 inference_executor = ThreadPoolExecutor(max_workers=1)
+cancelled_projects: set[str] = set()
+OVERLAY_MAX_PIXELS = 20_000_000
+
+
+@lru_cache(maxsize=6)
+def cached_imread(path: str, mtime_ns: int, flags: int) -> np.ndarray | None:
+    return cv2.imread(path, flags)
+
+
+def read_cached_image(path: Path, flags: int) -> np.ndarray | None:
+    stat = path.stat()
+    image = cached_imread(str(path), stat.st_mtime_ns, flags)
+    return None if image is None else image.copy()
+
+
+def clear_image_cache() -> None:
+    cached_imread.cache_clear()
 
 
 def require_project(project_id: str) -> ProjectInfo:
@@ -65,12 +83,26 @@ def require_project(project_id: str) -> ProjectInfo:
         raise HTTPException(status_code=404, detail="Project not found") from exc
 
 
+def maybe_make_overlay(project_id: str) -> None:
+    project = get_project(project_id)
+    if project.image.width * project.image.height > OVERLAY_MAX_PIXELS:
+        return
+    root = project_dir(project_id)
+    final_mask = read_mask(root / "mask_final.png")
+    make_overlay(source_path(project_id), final_mask, root / "overlay_preview.jpg")
+
+
 def run_inference_job(project_id: str) -> None:
     try:
+        if project_id in cancelled_projects:
+            set_status(project_id, "cancelled", error="Cancelled before start")
+            return
         set_status(project_id, "running", error=None)
         root = project_dir(project_id)
 
         def update_progress(done: int, total: int) -> None:
+            if project_id in cancelled_projects:
+                raise RuntimeError("Inference cancelled")
             update_project(
                 project_id,
                 inference_progress={
@@ -90,14 +122,18 @@ def run_inference_job(project_id: str) -> None:
         )
         save_probability(project_id, probability)
         stats = recompute_final_mask(project_id)
-        final_mask = read_mask(root / "mask_final.png")
-        make_overlay(source_path(project_id), final_mask, root / "overlay_preview.jpg")
+        clear_image_cache()
+        maybe_make_overlay(project_id)
         meta["threshold"] = get_project(project_id).threshold
         write_json(root / "inference_meta.json", meta)
         update_project(project_id, inference_progress={**meta, "percent": 100.0})
         set_status(project_id, "ready")
     except Exception as exc:  # noqa: BLE001
-        set_status(project_id, "failed", error=str(exc))
+        if project_id in cancelled_projects:
+            set_status(project_id, "cancelled", error="Inference cancelled")
+            cancelled_projects.discard(project_id)
+        else:
+            set_status(project_id, "failed", error=str(exc))
 
 
 @app.get("/api/health")
@@ -127,6 +163,7 @@ def api_get_project(project_id: str) -> ProjectInfo:
 @app.post("/api/projects/{project_id}/infer", response_model=ProjectInfo)
 def api_infer_project(project_id: str) -> ProjectInfo:
     require_project(project_id)
+    cancelled_projects.discard(project_id)
     update_project(
         project_id,
         status="running",
@@ -137,38 +174,77 @@ def api_infer_project(project_id: str) -> ProjectInfo:
     return get_project(project_id)
 
 
+@app.post("/api/projects/{project_id}/cancel", response_model=ProjectInfo)
+def api_cancel_project(project_id: str) -> ProjectInfo:
+    require_project(project_id)
+    cancelled_projects.add(project_id)
+    set_status(project_id, "cancelled", error="Cancelled by user")
+    return get_project(project_id)
+
+
+@app.post("/api/projects/{project_id}/reset", response_model=ProjectInfo)
+def api_reset_project(project_id: str) -> ProjectInfo:
+    project = require_project(project_id)
+    if project.status != "ready":
+        raise HTTPException(status_code=409, detail="Mask is not ready yet")
+    root = project_dir(project_id)
+    empty = np.zeros((project.image.height, project.image.width), dtype=np.uint8)
+    cv2.imwrite(str(root / "mask_add.png"), empty)
+    cv2.imwrite(str(root / "mask_erase.png"), empty)
+    update_project(project_id, threshold=DEFAULT_THRESHOLD, error=None)
+    recompute_final_mask(project_id)
+    clear_image_cache()
+    maybe_make_overlay(project_id)
+    return get_project(project_id)
+
+
 @app.patch("/api/projects/{project_id}/threshold", response_model=ProjectInfo)
 def api_update_threshold(project_id: str, payload: ThresholdUpdate) -> ProjectInfo:
-    require_project(project_id)
+    project = require_project(project_id)
+    if project.status != "ready":
+        raise HTTPException(status_code=409, detail="Mask is not ready yet")
     update_project(project_id, threshold=payload.threshold)
     recompute_final_mask(project_id)
-    root = project_dir(project_id)
-    final_mask = read_mask(root / "mask_final.png")
-    make_overlay(source_path(project_id), final_mask, root / "overlay_preview.jpg")
+    clear_image_cache()
+    maybe_make_overlay(project_id)
     return get_project(project_id)
 
 
 @app.post("/api/projects/{project_id}/edits", response_model=ProjectInfo)
 def api_apply_edit(project_id: str, payload: StrokeEdit) -> ProjectInfo:
-    require_project(project_id)
+    project = require_project(project_id)
+    if project.status != "ready":
+        raise HTTPException(status_code=409, detail="Mask is not ready yet")
     root = project_dir(project_id)
-    target = root / ("mask_add.png" if payload.mode == "add" else "mask_erase.png")
-    layer = cv2.imread(str(target), cv2.IMREAD_GRAYSCALE)
-    if layer is None:
+    add_path = root / "mask_add.png"
+    erase_path = root / "mask_erase.png"
+    add_layer = cv2.imread(str(add_path), cv2.IMREAD_GRAYSCALE)
+    erase_layer = cv2.imread(str(erase_path), cv2.IMREAD_GRAYSCALE)
+    if add_layer is None or erase_layer is None:
         raise HTTPException(status_code=404, detail="Edit layer not found")
 
     points = np.array(payload.points, dtype=np.int32)
+    stroke = np.zeros_like(add_layer)
     if len(points) == 1:
-        cv2.circle(layer, tuple(points[0]), payload.radius, 255, thickness=-1)
+        cv2.circle(stroke, tuple(points[0]), payload.radius, 255, thickness=-1)
     elif len(points) > 1:
-        cv2.polylines(layer, [points], isClosed=False, color=255, thickness=payload.radius * 2)
+        cv2.polylines(stroke, [points], isClosed=False, color=255, thickness=payload.radius * 2)
         for point in points:
-            cv2.circle(layer, tuple(point), payload.radius, 255, thickness=-1)
+            cv2.circle(stroke, tuple(point), payload.radius, 255, thickness=-1)
 
-    cv2.imwrite(str(target), layer)
+    stroke_bool = stroke > 0
+    if payload.mode == "add":
+        add_layer[stroke_bool] = 255
+        erase_layer[stroke_bool] = 0
+    else:
+        erase_layer[stroke_bool] = 255
+        add_layer[stroke_bool] = 0
+
+    cv2.imwrite(str(add_path), add_layer)
+    cv2.imwrite(str(erase_path), erase_layer)
     recompute_final_mask(project_id)
-    final_mask = read_mask(root / "mask_final.png")
-    make_overlay(source_path(project_id), final_mask, root / "overlay_preview.jpg")
+    clear_image_cache()
+    maybe_make_overlay(project_id)
     return get_project(project_id)
 
 
@@ -206,7 +282,7 @@ def api_overlay(project_id: str) -> FileResponse:
     return FileResponse(path)
 
 
-def make_tile(image: np.ndarray, z: int, x: int, y: int, is_mask: bool) -> bytes:
+def tile_geometry(image: np.ndarray, z: int, x: int, y: int) -> tuple[slice, slice, int]:
     height, width = image.shape[:2]
     max_level = int(np.ceil(np.log2(max(width, height) / VIEW_TILE_SIZE)))
     max_level = max(max_level, 0)
@@ -214,13 +290,26 @@ def make_tile(image: np.ndarray, z: int, x: int, y: int, is_mask: bool) -> bytes
     tile_size = VIEW_TILE_SIZE * scale
     x0 = x * tile_size
     y0 = y * tile_size
-    crop = image[y0 : y0 + tile_size, x0 : x0 + tile_size]
+    return slice(y0, min(y0 + tile_size, height)), slice(x0, min(x0 + tile_size, width)), scale
+
+
+def encode_tile(crop: np.ndarray, scale: int, is_mask: bool) -> bytes:
     if crop.size == 0:
         crop = np.zeros((1, 1), dtype=np.uint8) if is_mask else np.zeros((1, 1, 3), dtype=np.uint8)
-    if scale != 1:
-        crop = cv2.resize(crop, (VIEW_TILE_SIZE, VIEW_TILE_SIZE), interpolation=cv2.INTER_NEAREST if is_mask else cv2.INTER_AREA)
+    target_w = max(1, int(np.ceil(crop.shape[1] / scale)))
+    target_h = max(1, int(np.ceil(crop.shape[0] / scale)))
+    crop = cv2.resize(
+        crop,
+        (target_w, target_h),
+        interpolation=cv2.INTER_NEAREST if is_mask else cv2.INTER_AREA,
+    )
+    if crop.ndim == 3:
+        canvas = np.zeros((VIEW_TILE_SIZE, VIEW_TILE_SIZE, crop.shape[2]), dtype=np.uint8)
+    else:
+        canvas = np.zeros((VIEW_TILE_SIZE, VIEW_TILE_SIZE), dtype=np.uint8)
+    canvas[: crop.shape[0], : crop.shape[1]] = crop
     ext = ".png" if is_mask else ".jpg"
-    ok, encoded = cv2.imencode(ext, crop)
+    ok, encoded = cv2.imencode(ext, canvas)
     if not ok:
         raise HTTPException(status_code=500, detail="Tile encoding failed")
     return encoded.tobytes()
@@ -229,19 +318,23 @@ def make_tile(image: np.ndarray, z: int, x: int, y: int, is_mask: bool) -> bytes
 @app.get("/api/projects/{project_id}/tiles/image/{z}/{x}/{y}.jpg")
 def api_image_tile(project_id: str, z: int, x: int, y: int) -> Response:
     require_project(project_id)
-    image = cv2.imread(str(source_path(project_id)), cv2.IMREAD_COLOR)
+    image = read_cached_image(source_path(project_id), cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(status_code=404, detail="Source image not found")
-    return Response(make_tile(image, z, x, y, is_mask=False), media_type="image/jpeg")
+    y_slice, x_slice, scale = tile_geometry(image, z, x, y)
+    crop = image[y_slice, x_slice]
+    return Response(encode_tile(crop, scale, is_mask=False), media_type="image/jpeg")
 
 
 @app.get("/api/projects/{project_id}/tiles/mask/{z}/{x}/{y}.png")
 def api_mask_tile(project_id: str, z: int, x: int, y: int) -> Response:
     require_project(project_id)
-    mask = cv2.imread(str(project_dir(project_id) / "mask_final.png"), cv2.IMREAD_GRAYSCALE)
+    mask = read_cached_image(project_dir(project_id) / "mask_final.png", cv2.IMREAD_GRAYSCALE)
     if mask is None:
         raise HTTPException(status_code=404, detail="Mask not found")
-    rgba = np.zeros((*mask.shape, 4), dtype=np.uint8)
+    y_slice, x_slice, scale = tile_geometry(mask, z, x, y)
+    mask_crop = mask[y_slice, x_slice]
+    rgba = np.zeros((*mask_crop.shape, 4), dtype=np.uint8)
     rgba[..., 2] = 255
-    rgba[..., 3] = (mask > 127).astype(np.uint8) * 150
-    return Response(make_tile(rgba, z, x, y, is_mask=True), media_type="image/png")
+    rgba[..., 3] = (mask_crop > 127).astype(np.uint8) * 150
+    return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")

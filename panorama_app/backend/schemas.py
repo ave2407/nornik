@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-ProjectStatus = Literal["created", "running", "ready", "failed"]
+ProjectStatus = Literal["created", "running", "ready", "failed", "cancelled"]
 EditMode = Literal["add", "erase"]
 ExportKind = Literal["zip", "mask_png", "overlay_jpg", "stats_json"]
 

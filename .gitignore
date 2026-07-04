@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and local metadata
+.idea/
+.vscode/
+.agents/
+.codex/
+
+# Node / frontend
+node_modules/
+.pnpm-store/
+dist/
+build/
+
+# Local data and generated ML artifacts
+remaining_dataset_clean/
+talc_unetpp_dataset_from_json/
+talc_masks_out/
+talc1-5d08d959.json
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Heavy exploratory artifacts
+EDA.ipynb
+history.csv
+
+# OS files
+.DS_Store
+Thumbs.db

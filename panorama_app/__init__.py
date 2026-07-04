@@ -1,0 +1,1 @@
+"""Panorama talc segmentation application."""

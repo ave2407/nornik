@@ -28,4 +28,31 @@ button.active, button.selected { border-color: #2563eb; background: #eaf1ff; }
   .app { grid-template-columns: 240px 1fr; }
   .inspector { display: none; }
 }
-
+.reason {
+  color: #344256;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 12px 0 0;
+}
+.legend {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: #344256;
+  font-size: 13px;
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid #cdd6df;
+}
+.swatch.talc { background: #1455ff; }
+.swatch.ordinary { background: #18a34a; }
+.swatch.difficult { background: #dc2626; }

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -16,12 +15,16 @@ def export_project_zip(project_id: str) -> Path:
     include = [
         "project.json",
         "stats.json",
+        "phase_stats.json",
+        "classification.json",
         "inference_meta.json",
         "mask_base.png",
         "mask_add.png",
         "mask_erase.png",
         "mask_final.png",
+        "phase_overlay.jpg",
         "overlay_preview.jpg",
+        "phase_masks.npz",
         "probability.npy",
     ]
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -44,9 +47,11 @@ def export_single(project_id: str, kind: str) -> Path:
         "mask_png": root / "mask_final.png",
         "overlay_jpg": root / "overlay_preview.jpg",
         "stats_json": root / "stats.json",
+        "classification_json": root / "classification.json",
+        "phase_stats_json": root / "phase_stats.json",
+        "phase_overlay_jpg": root / "phase_overlay.jpg",
     }
     src = mapping[kind]
     dst = exports / src.name
     shutil.copy2(src, dst)
     return dst
-

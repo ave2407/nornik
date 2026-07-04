@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
-from .classifier import DummyClassifierService
+from .classifier import ExpertRuleClassifierService
 from .config import (
     ALLOWED_IMAGE_EXTS,
     DEFAULT_THRESHOLD,
@@ -54,7 +54,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-classifier = DummyClassifierService()
+classifier = ExpertRuleClassifierService()
 onnx_model = OnnxSegmentationModel()
 inference_executor = ThreadPoolExecutor(max_workers=1)
 cancelled_projects: set[str] = set()
@@ -251,8 +251,15 @@ def api_apply_edit(project_id: str, payload: StrokeEdit) -> ProjectInfo:
 @app.post("/api/projects/{project_id}/export")
 def api_export_project(project_id: str, payload: ExportRequest) -> FileResponse:
     require_project(project_id)
+    classifier.classify(project_id)
     path = export_single(project_id, payload.kind)
     return FileResponse(path, filename=path.name)
+
+
+@app.post("/api/projects/{project_id}/analyze", response_model=ClassificationResult)
+def api_analyze_project(project_id: str) -> ClassificationResult:
+    require_project(project_id)
+    return classifier.classify(project_id)
 
 
 @app.get("/api/classification/{project_id}", response_model=ClassificationResult)
@@ -279,6 +286,16 @@ def api_overlay(project_id: str) -> FileResponse:
     path = project_dir(project_id) / "overlay_preview.jpg"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Overlay is not ready")
+    return FileResponse(path)
+
+
+@app.get("/api/projects/{project_id}/phase_overlay")
+def api_phase_overlay(project_id: str) -> FileResponse:
+    require_project(project_id)
+    classifier.classify(project_id)
+    path = project_dir(project_id) / "phase_overlay.jpg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Phase overlay is not ready")
     return FileResponse(path)
 
 
@@ -337,4 +354,32 @@ def api_mask_tile(project_id: str, z: int, x: int, y: int) -> Response:
     rgba = np.zeros((*mask_crop.shape, 4), dtype=np.uint8)
     rgba[..., 2] = 255
     rgba[..., 3] = (mask_crop > 127).astype(np.uint8) * 150
+    return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")
+
+
+
+@app.get("/api/projects/{project_id}/tiles/phases/{z}/{x}/{y}.png")
+def api_phase_tile(project_id: str, z: int, x: int, y: int) -> Response:
+    project = require_project(project_id)
+    classifier.classify(project_id)
+    masks_path = project_dir(project_id) / "phase_masks.npz"
+    if not masks_path.exists():
+        raise HTTPException(status_code=404, detail="Phase masks not found")
+    data = np.load(masks_path)
+    source_shape = data["source_shape"]
+    source_canvas = np.zeros((int(source_shape[0]), int(source_shape[1])), dtype=np.uint8)
+    y_slice, x_slice, scale = tile_geometry(source_canvas, z, x, y)
+    mask_h, mask_w = data["talc"].shape[:2]
+    source_h, source_w = int(source_shape[0]), int(source_shape[1])
+    my0 = int(np.floor(y_slice.start * mask_h / max(source_h, 1)))
+    my1 = int(np.ceil(y_slice.stop * mask_h / max(source_h, 1)))
+    mx0 = int(np.floor(x_slice.start * mask_w / max(source_w, 1)))
+    mx1 = int(np.ceil(x_slice.stop * mask_w / max(source_w, 1)))
+    talc = data["talc"][my0:my1, mx0:mx1] > 0
+    ordinary = data["ordinary"][my0:my1, mx0:mx1] > 0
+    thin = data["thin"][my0:my1, mx0:mx1] > 0
+    rgba = np.zeros((*talc.shape, 4), dtype=np.uint8)
+    rgba[talc] = (255, 0, 0, 150)
+    rgba[ordinary] = (0, 180, 0, 150)
+    rgba[thin] = (0, 0, 255, 150)
     return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")

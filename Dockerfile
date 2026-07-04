@@ -6,7 +6,7 @@ RUN npm install
 COPY panorama_app/frontend/ ./
 RUN npm run build
 
-FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+FROM python:3.10-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -20,15 +20,14 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      python3 \
-      python3-pip \
       libgomp1 \
+      libgl1 \
       ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY panorama_app/requirements.txt /app/panorama_app/requirements.txt
-RUN python3 -m pip install --no-cache-dir --upgrade pip \
-    && python3 -m pip install --no-cache-dir -r /app/panorama_app/requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r /app/panorama_app/requirements.txt
 
 COPY panorama_app /app/panorama_app
 COPY --from=frontend /build/panorama_app/frontend/dist /app/panorama_app/frontend/dist

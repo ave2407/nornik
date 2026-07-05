@@ -84,6 +84,14 @@ class ExportRequest(BaseModel):
     kind: ExportKind = "zip"
 
 
+class BatchExportRequest(BaseModel):
+    project_ids: list[str]
+
+
+class ProbabilityPoint(BaseModel):
+    probability: float | None = None
+
+
 class ClassificationResult(BaseModel):
     project_id: str
     class_name: str = "unknown"

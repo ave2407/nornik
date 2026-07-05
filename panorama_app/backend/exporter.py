@@ -1,10 +1,38 @@
 from __future__ import annotations
 
 import shutil
+import uuid
 import zipfile
 from pathlib import Path
 
+from .config import DATA_ROOT
 from .storage import project_dir, source_path
+
+EXPORT_FILES = [
+    "project.json",
+    "stats.json",
+    "phase_stats.json",
+    "classification.json",
+    "inference_meta.json",
+    "mask_base.png",
+    "mask_add.png",
+    "mask_erase.png",
+    "mask_final.png",
+    "phase_overlay.jpg",
+    "overlay_preview.jpg",
+    "phase_masks.npz",
+    "probability.npy",
+]
+
+
+def _write_project_into_zip(zf: zipfile.ZipFile, project_id: str, prefix: str = "") -> None:
+    root = project_dir(project_id)
+    src = source_path(project_id)
+    zf.write(src, arcname=f"{prefix}{src.name}")
+    for name in EXPORT_FILES:
+        path = root / name
+        if path.exists():
+            zf.write(path, arcname=f"{prefix}{name}")
 
 
 def export_project_zip(project_id: str) -> Path:
@@ -12,28 +40,18 @@ def export_project_zip(project_id: str) -> Path:
     exports = root / "exports"
     exports.mkdir(exist_ok=True)
     out = exports / "project_export.zip"
-    include = [
-        "project.json",
-        "stats.json",
-        "phase_stats.json",
-        "classification.json",
-        "inference_meta.json",
-        "mask_base.png",
-        "mask_add.png",
-        "mask_erase.png",
-        "mask_final.png",
-        "phase_overlay.jpg",
-        "overlay_preview.jpg",
-        "phase_masks.npz",
-        "probability.npy",
-    ]
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        src = source_path(project_id)
-        zf.write(src, arcname=src.name)
-        for name in include:
-            path = root / name
-            if path.exists():
-                zf.write(path, arcname=name)
+        _write_project_into_zip(zf, project_id)
+    return out
+
+
+def export_projects_zip(project_ids: list[str]) -> Path:
+    batch_dir = DATA_ROOT / "batch_exports"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    out = batch_dir / f"export_{uuid.uuid4().hex[:8]}.zip"
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for project_id in project_ids:
+            _write_project_into_zip(zf, project_id, prefix=f"{project_id}/")
     return out
 
 

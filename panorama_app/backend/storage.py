@@ -10,6 +10,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
+# Panorama sources are trusted lab scans, routinely well above Pillow's default
+# decompression-bomb threshold (~179MP) - disable the check instead of rejecting them.
+Image.MAX_IMAGE_PIXELS = None
+
 from .config import DEFAULT_THRESHOLD, PROJECTS_ROOT
 from .schemas import ImageInfo, MaskStats, ProjectInfo, ProjectStatus
 from .stats import compute_mask_stats

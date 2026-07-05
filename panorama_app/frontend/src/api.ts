@@ -46,6 +46,10 @@ export type ProjectInfo = {
   updated_at: string;
 };
 
+export type ProbabilityPoint = {
+  probability: number | null;
+};
+
 export type ClassificationResult = {
   project_id: string;
   class_name: string;
@@ -79,6 +83,7 @@ export const api = {
   infer: (id: string) => request<ProjectInfo>(`/api/projects/${id}/infer`, { method: "POST" }),
   cancel: (id: string) => request<ProjectInfo>(`/api/projects/${id}/cancel`, { method: "POST" }),
   reset: (id: string) => request<ProjectInfo>(`/api/projects/${id}/reset`, { method: "POST" }),
+  remove: (id: string) => request<{ ok: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
   threshold: (id: string, threshold: number) =>
     request<ProjectInfo>(`/api/projects/${id}/threshold`, {
       method: "PATCH",
@@ -92,6 +97,8 @@ export const api = {
       body: JSON.stringify({ mode, points, radius }),
     }),
   analyze: (id: string) => request<ClassificationResult>(`/api/projects/${id}/analyze`, { method: "POST" }),
+  probabilityAt: (id: string, x: number, y: number) =>
+    request<ProbabilityPoint>(`/api/projects/${id}/probability_at?x=${x}&y=${y}`),
   classification: (id: string) => request<ClassificationResult>(`/api/classification/${id}`),
   exportUrl: (id: string) => `${API_BASE}/api/projects/${id}/export`,
   sourceUrl: (id: string) => `${API_BASE}/api/projects/${id}/source`,

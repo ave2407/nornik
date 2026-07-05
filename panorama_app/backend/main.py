@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -21,11 +22,13 @@ from .config import (
     TILE_SIZE,
     VIEW_TILE_SIZE,
 )
-from .exporter import export_single
+from .exporter import export_projects_zip, export_single
 from .inference import OnnxSegmentationModel, infer_image_probability, make_overlay
 from .schemas import (
+    BatchExportRequest,
     ClassificationResult,
     ExportRequest,
+    ProbabilityPoint,
     ProjectInfo,
     StrokeEdit,
     ThresholdUpdate,
@@ -75,6 +78,19 @@ def read_cached_image(path: Path, flags: int) -> np.ndarray | None:
 
 def clear_image_cache() -> None:
     cached_imread.cache_clear()
+
+
+@lru_cache(maxsize=4)
+def cached_probability(path: str, mtime_ns: int) -> np.ndarray:
+    return np.load(path)
+
+
+def read_cached_probability(project_id: str) -> np.ndarray | None:
+    path = project_dir(project_id) / "probability.npy"
+    if not path.exists():
+        return None
+    stat = path.stat()
+    return cached_probability(str(path), stat.st_mtime_ns)
 
 
 def require_project(project_id: str) -> ProjectInfo:
@@ -257,6 +273,26 @@ def api_export_project(project_id: str, payload: ExportRequest) -> FileResponse:
     return FileResponse(path, filename=path.name)
 
 
+@app.post("/api/export/batch")
+def api_export_batch(payload: BatchExportRequest) -> FileResponse:
+    if not payload.project_ids:
+        raise HTTPException(status_code=400, detail="No projects selected")
+    for project_id in payload.project_ids:
+        require_project(project_id)
+        classifier.classify(project_id)
+    path = export_projects_zip(payload.project_ids)
+    return FileResponse(path, filename=path.name)
+
+
+@app.delete("/api/projects/{project_id}")
+def api_delete_project(project_id: str) -> dict:
+    require_project(project_id)
+    shutil.rmtree(project_dir(project_id), ignore_errors=True)
+    clear_image_cache()
+    cached_probability.cache_clear()
+    return {"ok": True}
+
+
 @app.post("/api/projects/{project_id}/analyze", response_model=ClassificationResult)
 def api_analyze_project(project_id: str) -> ClassificationResult:
     require_project(project_id)
@@ -298,6 +334,18 @@ def api_phase_overlay(project_id: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Phase overlay is not ready")
     return FileResponse(path)
+
+
+@app.get("/api/projects/{project_id}/probability_at", response_model=ProbabilityPoint)
+def api_probability_at(project_id: str, x: int, y: int) -> ProbabilityPoint:
+    require_project(project_id)
+    probability = read_cached_probability(project_id)
+    if probability is None:
+        raise HTTPException(status_code=404, detail="Probability map not found")
+    height, width = probability.shape[:2]
+    if not (0 <= x < width and 0 <= y < height):
+        return ProbabilityPoint(probability=None)
+    return ProbabilityPoint(probability=float(probability[y, x]))
 
 
 def tile_geometry(image: np.ndarray, z: int, x: int, y: int) -> tuple[slice, slice, int]:
@@ -353,10 +401,29 @@ def api_mask_tile(project_id: str, z: int, x: int, y: int) -> Response:
     y_slice, x_slice, scale = tile_geometry(mask, z, x, y)
     mask_crop = mask[y_slice, x_slice]
     rgba = np.zeros((*mask_crop.shape, 4), dtype=np.uint8)
-    rgba[..., 2] = 255
+    # encode_tile -> cv2.imencode treats this array as BGRA, so channel 0 is Blue.
+    rgba[..., 0] = 255
     rgba[..., 3] = (mask_crop > 127).astype(np.uint8) * 150
     return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")
 
+
+@app.get("/api/projects/{project_id}/tiles/heatmap/{z}/{x}/{y}.png")
+def api_heatmap_tile(project_id: str, z: int, x: int, y: int) -> Response:
+    require_project(project_id)
+    probability = read_cached_probability(project_id)
+    if probability is None:
+        raise HTTPException(status_code=404, detail="Probability map not found")
+    y_slice, x_slice, scale = tile_geometry(probability, z, x, y)
+    prob_crop = probability[y_slice, x_slice]
+    if prob_crop.size == 0:
+        rgba = np.zeros((0, 0, 4), dtype=np.uint8)
+    else:
+        gray = np.clip(prob_crop * 255.0, 0, 255).astype(np.uint8)
+        colored = cv2.applyColorMap(gray, cv2.COLORMAP_TURBO)
+        rgba = np.zeros((*colored.shape[:2], 4), dtype=np.uint8)
+        rgba[..., :3] = colored
+        rgba[..., 3] = 190
+    return Response(encode_tile(rgba, scale, is_mask=True), media_type="image/png")
 
 
 @app.get("/api/projects/{project_id}/tiles/phases/{z}/{x}/{y}.png")

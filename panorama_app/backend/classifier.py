@@ -112,8 +112,8 @@ class ExpertRuleClassifierService(ClassifierService):
             display_name = DISPLAY_NAMES[class_name]
             confidence = max(0.9, float(model_confidence or 0.0)) if model_class == "talc" else 0.9
             decision_reason = (
-                f"talc_percent={talc_percent:.2f}% > 10%, expert talc rule overrides model "
-                f"prediction {model_class}"
+                f"доля талька {talc_percent:.2f}% > 10% — экспертное правило переопределяет "
+                f"предсказание модели ({DISPLAY_NAMES.get(model_class, model_class)})"
             )
             rule_version = "talc_gt_10_overrides_onnx_v1"
         else:
@@ -121,8 +121,8 @@ class ExpertRuleClassifierService(ClassifierService):
             display_name = DISPLAY_NAMES.get(class_name, class_name)
             confidence = model_confidence
             decision_reason = (
-                f"ONNX classifier selected {class_name}; talc_percent={talc_percent:.2f}% <= 10%, "
-                "phase masks are shown as auxiliary explanation only"
+                f"классификатор выбрал класс «{display_name}»; доля талька {talc_percent:.2f}% <= 10%, "
+                "фазовые маски показаны только как вспомогательное пояснение"
             )
             rule_version = "onnx_primary_when_talc_le_10_v1"
 
